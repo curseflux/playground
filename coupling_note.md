@@ -432,3 +432,101 @@ tensors), WeightSentry, NeuroPots.
 None of these asks how few protected bits are *necessary*. That is the surviving
 differentiator, and it means the paper cannot be sold on the pipeline or the byte count —
 442 bytes is not a headline when LM-Fix reports <1 KB with a published method.
+
+---
+
+# Addendum 2 — more than one change per row
+
+What changes if a row takes `m` changes instead of one? Verified with
+`scratchpad/multi2.py`; the headline is that the **information** degrades gently while
+the **decoder** blows up, and that resolves an open item in `RESULTS_REPORT.md` §11.
+
+## B1. The geometry generalises exactly
+
+With `m` changes per row, `s = m`, so confusability means differing in `≤ 2m`
+coordinates and the invisible region lives on supports of size `k = 2m`:
+
+```
+P_S = { δ ∈ R^k : |⟨δ, g_i⟩| < W  for all i }
+```
+
+an intersection of `N` slabs in `k` dimensions. **Proposition 1 is dimension-free** —
+its proof `⟨δ, Lz⟩ = ⟨L^T δ, z⟩` never used `k = 2`. So
+
+```
+vol P_S  =  vol P_whitened / sqrt(det Σ_S)
+```
+
+with `Σ_S` the `2m × 2m` Gram submatrix. The pairwise coupling penalty
+`−½log2(1−ρ²)` generalises to `−½ log2 det Σ_S` — from a *correlation* to the
+*conditioning of a 2m-column submatrix*, i.e. restricted-isometry territory.
+
+**Verified exactly** (set membership, not volume, so no Monte Carlo error):
+`δ ∈ P(Lz) ⟺ L^T δ ∈ P(z)`, **0 mismatches in 2,000,000 test points** across
+`k ∈ {2,3,4,6,10}` and `N ∈ {5,40}`.
+
+The volume scales as `N^{-k}`, so the clique bits decay at slope `−2m`. Measured by
+radial Monte Carlo (40 replicates, 60k directions):
+
+| m | k=2m | fitted slope | theory |
+|--:|--:|--:|--:|
+| 1 | 2 | −2.17 | −2 |
+| 2 | 4 | −4.26 | −4 |
+| 3 | 6 | −5.82 | −6 |
+
+## B2. The information cost grows linearly in m
+
+The sparse gain becomes `γ_{2m}`, bounded below via Marchenko–Pastur by
+`≈ 1 − sqrt(2m/N)`:
+
+| m | 2m | N=256 | N=2048 |
+|--:|--:|--:|--:|
+| 1 | 2 | 0.912 | 0.969 |
+| 2 | 4 | 0.875 | 0.956 |
+| 5 | 10 | 0.802 | 0.930 |
+| 20 | 40 | 0.605 | 0.860 |
+| 100 | 200 | 0.116 | 0.688 |
+| 500 | 1000 | vacuous | 0.301 |
+
+Barely moves for small `m`. The checksum needs minimum distance `2m+1`, so roughly
+`2m` checks — **linear in m**.
+
+**The hard wall is `2m = N`.** Any `N+1` columns of an `N × d` matrix are linearly
+dependent, so once `2m ≥ N` there is an invisible change of *unbounded* size and the
+bound is vacuous. At `N = 2048` that is `m ≥ 1024` — far outside the damage model.
+
+## B3. The decoder is what breaks
+
+The decoder must hypothesise which columns moved: `C(d, m)` supports, `d = 4096`.
+
+| m | hypotheses | checks |
+|--:|--:|--:|
+| 1 | 4.1e3 | 2 |
+| 2 | 8.4e6 | 4 |
+| 3 | 1.1e10 | 6 |
+| 4 | 1.2e13 | 8 |
+
+`interval_audit.py` scans 4,096 columns per row. At `m = 2` that is 2,000× more work;
+at `m = 3` it is out of reach. **Information linear in `m`, computation exponential.**
+
+## B4. This resolves the concentrated-tamper puzzle
+
+`RESULTS_REPORT.md` §11 lists *"Concentrated changes intrinsically need the full
+budget"* as **Not established**, and the consolidated document §9.6 says explanations
+"are plausible but not established as information-theoretic impossibility."
+
+The analysis above says they are right to have withheld the claim, and says why:
+for `m ≪ N/2` concentrated damage is **not** information-theoretically harder —
+`γ_{2m}` is nearly unchanged and the checks grow linearly. What fails is the search
+over `C(d,m)` supports. The observed failure was the localiser, not a converse.
+
+That is testable: run the exact `m = 2` decoder on one row by scanning all 8.4M column
+pairs. If it recovers the tamper with ~2× the checks, the information claim holds and
+the earlier concentrated-case failure is confirmed computational.
+
+## B5. Caveat on the damage model
+
+Everything downstream of `m = 1` rests on damage being dispersed. One row of this head
+is 4,096 BF16 values = 8 KB, spanning several memory pages, and physical fault
+mechanisms (Rowhammer, particle strikes) are spatially localised. Whether real faults
+land one-per-row is a modelling assumption, not a fact, and it should be stated as one.
