@@ -288,3 +288,147 @@ section does not carry the distinction through.
 
 Items 1 and 2 are hours of work on the existing GPU box. Item 3 is a definition. Item 4 is
 the actual research risk.
+
+---
+
+# Addendum — literature check, a correction to my own §4, and the upper bound
+
+Added after a targeted literature check and a re-reading of Theorem B. Two of the
+findings below cut against claims made earlier in this note; they are stated first.
+
+## A1. Correction: I computed the weaker of two cliques
+
+Theorem B supplies **two** clique families, and §1–§4 above use only the second:
+
+- `P_2s(m)` — vary the `2s` coordinates with the largest alphabets. This is the
+  pair geometry of §1, and it is what §4's 160–450 bit prediction estimates.
+- `B_s(m)` — **all fiber originals within `s` changes of a common checkpoint `z`.**
+
+For the Llama head the second dominates, and not narrowly. Take `z = w` (the original
+itself, a legal checkpoint since every candidate reaches it in ≤ 64 changes). Members:
+choose any 64 of the 128,256 rows, and in each an invisible single-coordinate change.
+
+```
+log2 C(128256, 64)                       =   790 bits   (which rows)
+64 rows x 20.15 bits/row (their §8)      = 1,290 bits   (which column, which value)
+                                   total = 2,080 bits
+```
+
+**The reported 1,287-bit converse is missing the 790-bit row-choice term.** It multiplies
+the per-row figure by `s` without paying for the choice of rows, though those choices are
+what make the family a clique around a common `z`. Against the 3,968-bit baseline this
+caps the provable saving under a **uniform** guarantee at **47.6%**, not 97%.
+
+This also deflates §4 of this note: spreading the coordinate budget across 64 rows beats
+doubling up in fewer rows, because the row-choice term rewards more rows (32 rows with
+2 changes each gives ≈1,900 bits, below 2,080). **Coupling is therefore a second-order
+effect on the head-level lower bound, not the driver.** §4's number should be read as the
+`P_2s` term, which loses.
+
+A second warning in the same direction: in the audit's own erasure counterexample the
+`P_2s` clique gives 2 bits where the true optimum is `⌈log2(n+1)⌉ = 17`. The pair clique
+can be loose by a large factor even when the fiber *is* a product.
+
+## A2. What the coupling result actually is: a bridging lemma
+
+Given A1, the honest description of Proposition 1 is not "a better bound". It is this:
+
+> `proof_and_validity.md` §7 rejects applying Theorem C to the Llama head — *"It is valid
+> only when those rank sets are defined from the retained record before the tamper. This
+> condition is not established for the per-damaged-row Llama lists."*
+
+That objection is now answerable. Define the **public difference alphabet**
+
+```
+A_j^diff = { δ : |δ · h_j(x_i)| < W for all i,  |δ| <= ρ }
+```
+
+Two originals differing only in coordinate `j` are confusable iff their difference lies
+in `A_j^diff`. This set depends only on the cached features and the cell width — **not on
+`w`, not on the tamper, not on the damaged checkpoint.** It is computable by the encoder
+before anything happens, which is exactly the condition Theorem C requires and the audit
+found missing. The coupled row satisfies Theorem C's hypothesis *on differences* even
+though it fails it on values.
+
+Proposition 1 then quantifies the residual error in that transfer: the pair correction is
+`-½log2 det Σ_jk`, i.e. `-½log2(1 - ρ_jk²)` beyond the product prediction.
+
+**So the contribution is: the product-fiber theorems transfer to a coupled row, with an
+explicit and measurable error term.** That is what §6 of the audit asked for. It does not
+by itself lower any bit count.
+
+## A3. The correction is mutual coherence, and superposition predicts it is tiny
+
+`max_{j≠k} |ρ_jk|` is the **mutual coherence** `μ(H)` of the feature matrix — the standard
+quantity governing sparse recovery. So the worst-case coupling correction over a row is
+`-½log2(1 - μ²)`, and coherence is exactly the classical object it should be.
+
+The correction is startlingly insensitive:
+
+| correction | needs \|ρ\| ≥ |
+|--:|--:|
+| 0.01 bits | 0.117 |
+| 0.1 bits | 0.360 |
+| **1 bit** | **0.866** |
+| 3 bits | 0.992 |
+
+Superposition theory predicts worst-case coherence on the order of `d^{-1/2}` for a
+width-`d` network ([Linear-Readout Floors and Threshold Recovery in Computation in
+Superposition](https://arxiv.org/abs/2605.01192)). At `d = 4096` that is `μ ≈ 0.0156`, so
+
+```
+correction  =  -0.5 * log2(1 - 0.0156²)  =  0.0002 bits
+```
+
+**If Llama's output-head features obey the superposition packing bound, coupling costs
+essentially nothing and the product theorems transfer almost exactly.** If instead the
+known outlier/massive-activation directions produce near-collinear pairs, `μ → 1` and the
+correction is unbounded. This is a sharp, cheap, falsifiable test — one Gram matrix — and
+it is the single most informative measurement left in the project.
+
+## A4. The upper bound: reformulated, not solved
+
+The public difference set generalises to
+
+```
+D = { δ : ||δ||_0 <= 2s, δ ≠ 0, |<δ, h_i>| < W for all i, |δ_j| <= ρ }
+```
+
+again independent of `w`. A certificate is valid iff it separates every pair differing by
+an element of `D` — i.e. it is a **colouring of the Cayley graph on the weight lattice
+with connection set `D`**. That is a cleaner statement of the construction problem than
+"colour the confusability graph on the fiber", because `D` is computable up front.
+
+Three levels, all classical, and the gap between them is the whole problem:
+
+| | cost | note |
+|---|--:|---|
+| clique (lower) | `max` over supports | §1, and A1 shows which clique to use |
+| Vandermonde / RS | `2s·log2 p`, `p > n` | the 1,088-bit construction |
+| greedy / union bound | `log2 \|D\|` | ≈ the data-free baseline; useless |
+
+A random public `r ∈ F_p^d` with certificate `⟨r, index(w)⟩ mod p` fails only if
+`⟨r,δ⟩ ≡ 0` for some `δ ∈ D`, so `log2|D| + log2(1/ε)` bits suffice — and because `D` is
+computable, a chosen `r` can be **verified** against it, upgrading the guarantee from
+probabilistic to deterministic-uniform. Unfortunately `log2|D|` carries the full support
+count and lands near the baseline.
+
+**I did not find a construction beating 1,088 bits.** The one structural handle I would
+pursue: `D` is not an arbitrary sparse set, it is the sparse points of a *polytope*. Codes
+matched to Hamming structure (RS, BCH) ignore that. A lattice code matched to the dual of
+the measurement lattice is the natural object and I am not aware of it having been tried
+here. Offered as a direction, not a result.
+
+## A5. Prior art found
+
+The engineering pipeline is occupied. **LM-Fix** ([arXiv 2511.02866](https://arxiv.org/abs/2511.02866))
+runs a short test-vector pass, uses hash-guided checks plus **reference outputs** to
+localise bit flips in an LLM, and repairs by integer-view weight editing — <1 KB overhead,
+>100× faster than reload. **BitFlipScope** ([arXiv 2512.22174](https://arxiv.org/abs/2512.22174))
+does scalable fault localisation and recovery for bit-flip corruption in LLMs. Earlier:
+RADAR (2-bit checksum signatures over weight groups), HASHTAG (Pearson hashes over weight
+tensors), WeightSentry, NeuroPots.
+
+None of these asks how few protected bits are *necessary*. That is the surviving
+differentiator, and it means the paper cannot be sold on the pipeline or the byte count —
+442 bytes is not a headline when LM-Fix reports <1 KB with a published method.
